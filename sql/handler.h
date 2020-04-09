@@ -36,7 +36,7 @@
 #include "mdl.h"
 #include "vers_string.h"
 
-#include "sql_analyze_stmt.h" // for Exec_time_tracker 
+#include "sql_analyze_stmt.h" // for Exec_time_tracker
 
 #include <my_compare.h>
 #include <ft_global.h>
@@ -134,8 +134,8 @@ enum enum_alter_inplace_result {
   Without primary key, we can't call position().
   If not set, the position is returned as the current rows position
   regardless of what argument is given.
-*/ 
-#define HA_PRIMARY_KEY_REQUIRED_FOR_POSITION (1ULL << 16) 
+*/
+#define HA_PRIMARY_KEY_REQUIRED_FOR_POSITION (1ULL << 16)
 #define HA_CAN_RTREEKEYS       (1ULL << 17)
 #define HA_NOT_DELETE_WITH_CACHE (1ULL << 18) /* unused */
 /*
@@ -219,7 +219,7 @@ enum enum_alter_inplace_result {
   The handler may return "fake" rows constructed from the key of the row
   asked for. This is used to optimize UPDATE and DELETE by reducing the
   number of roundtrips between handler and storage engine.
-  
+
   Example:
   UPDATE a=1 WHERE pk IN (<keys>)
 
@@ -317,7 +317,7 @@ enum enum_alter_inplace_result {
   Index scan will not return records in rowid order. Not guaranteed to be
   set for unordered (e.g. HASH) indexes.
 */
-#define HA_KEY_SCAN_NOT_ROR     128 
+#define HA_KEY_SCAN_NOT_ROR     128
 #define HA_DO_INDEX_COND_PUSHDOWN  256 /* Supports Index Condition Pushdown */
 /*
   Data is clustered on this key. This means that when you read the key
@@ -872,6 +872,13 @@ typedef struct xid_t XID;
 #define SQL_XIDSIZE (XIDDATASIZE * 2 + 8 + MY_INT64_NUM_DECIMAL_DIGITS)
 /* The 'buf' has to have space for at least SQL_XIDSIZE bytes. */
 uint get_sql_xid(XID *xid, char *buf);
+
+/* struct for heuristic binlog truncate recovery */
+struct xid_recovery_member
+{
+  my_xid xid;
+  uint in_engine_prepare;  // number of engines that have xid prepared
+};
 
 /* for recover() handlerton call */
 #define MIN_XID_LIST_SIZE  128
@@ -1444,8 +1451,8 @@ struct handlerton
    uint (*partition_flags)();
    alter_table_operations (*alter_table_flags)(alter_table_operations flags);
    int (*alter_tablespace)(handlerton *hton, THD *thd, st_alter_tablespace *ts_info);
-   int (*fill_is_table)(handlerton *hton, THD *thd, TABLE_LIST *tables, 
-                        class Item *cond, 
+   int (*fill_is_table)(handlerton *hton, THD *thd, TABLE_LIST *tables,
+                        class Item *cond,
                         enum enum_schema_tables);
    uint32 flags;                                /* global handler flags */
    /*
@@ -1453,7 +1460,7 @@ struct handlerton
       init.
    */
    int (*binlog_func)(handlerton *hton, THD *thd, enum_binlog_func fn, void *arg);
-   void (*binlog_log_query)(handlerton *hton, THD *thd, 
+   void (*binlog_log_query)(handlerton *hton, THD *thd,
                             enum_binlog_command binlog_command,
                             const char *query, uint query_length,
                             const char *db, const char *table_name);
@@ -1492,13 +1499,13 @@ struct handlerton
 
      Used by open_table_error(), by the default rename_table and delete_table
      handler methods, and by the default discovery implementation.
-  
+
      For engines that have more than one file name extensions (separate
      metadata, index, and/or data files), the order of elements is relevant.
      First element of engine file name extensions array should be metadata
      file extention. This is implied by the open_table_error()
      and the default discovery implementation.
-     
+
      Second element - data file extension. This is implied
      assumed by REPAIR TABLE ... USE_FRM implementation.
    */
@@ -1679,7 +1686,7 @@ struct THD_TRANS
   bool        no_2pc;
   /* storage engines that registered in this transaction */
   Ha_trx_info *ha_list;
-  /* 
+  /*
     The purpose of this flag is to keep track of non-transactional
     tables that were modified in scope of:
     - transaction, when the variable is a member of
@@ -1693,16 +1700,16 @@ struct THD_TRANS
     it is reset to FALSE.  If such functions
     as mysql_insert, mysql_update, mysql_delete etc modify a
     non-transactional table, they set this flag to TRUE.  At the
-    end of the statement, the value of stmt.modified_non_trans_table 
+    end of the statement, the value of stmt.modified_non_trans_table
     is merged with all.modified_non_trans_table and gets reset.
     * all.modified_non_trans_table is reset at the end of transaction
-    
+
     * Since we do not have a dedicated context for execution of a
     sub-statement, to keep track of non-transactional changes in a
-    sub-statement, we re-use stmt.modified_non_trans_table. 
+    sub-statement, we re-use stmt.modified_non_trans_table.
     At entrance into a sub-statement, a copy of the value of
     stmt.modified_non_trans_table (containing the changes of the
-    outer statement) is saved on stack. Then 
+    outer statement) is saved on stack. Then
     stmt.modified_non_trans_table is reset to FALSE and the
     substatement is executed. Then the new value is merged with the
     saved value.
@@ -2142,7 +2149,7 @@ struct HA_CREATE_INFO: public Table_scope_and_contents_source_st,
   }
   bool add_alter_list_item_convert_to_charset(CHARSET_INFO *cs)
   {
-    /* 
+    /*
       cs cannot be NULL, as sql_yacc.yy translates
          CONVERT TO CHARACTER SET DEFAULT
       to
@@ -2154,7 +2161,7 @@ struct HA_CREATE_INFO: public Table_scope_and_contents_source_st,
     if (check_conflicting_charset_declarations(cs))
       return true;
     table_charset= default_table_charset= cs;
-    used_fields|= (HA_CREATE_USED_CHARSET | HA_CREATE_USED_DEFAULT_CHARSET);  
+    used_fields|= (HA_CREATE_USED_CHARSET | HA_CREATE_USED_DEFAULT_CHARSET);
     return false;
   }
   ulong table_options_with_row_type()
@@ -2494,15 +2501,15 @@ typedef struct st_range_seq_if
 {
   /*
     Get key information
- 
+
     SYNOPSIS
       get_key_info()
-        init_params  The seq_init_param parameter 
+        init_params  The seq_init_param parameter
         length       OUT length of the keys in this range sequence
         map          OUT key_part_map of the keys in this range sequence
 
     DESCRIPTION
-      This function is set only when using HA_MRR_FIXED_KEY mode. In that mode, 
+      This function is set only when using HA_MRR_FIXED_KEY mode. In that mode,
       all ranges are single-point equality ranges that use the same set of key
       parts. This function allows the MRR implementation to get the length of
       a key, and which keyparts it uses.
@@ -2511,11 +2518,11 @@ typedef struct st_range_seq_if
 
   /*
     Initialize the traversal of range sequence
-    
+
     SYNOPSIS
       init()
-        init_params  The seq_init_param parameter 
-        n_ranges     The number of ranges obtained 
+        init_params  The seq_init_param parameter
+        n_ranges     The number of ranges obtained
         flags        A combination of HA_MRR_SINGLE_POINT, HA_MRR_FIXED_KEY
 
     RETURN
@@ -2531,7 +2538,7 @@ typedef struct st_range_seq_if
       next()
         seq    The value returned by RANGE_SEQ_IF::init()
         range  OUT Information about the next range
-    
+
     RETURN
       FALSE - Ok, the range structure filled with info about the next range
       TRUE  - No more ranges
@@ -2544,15 +2551,15 @@ typedef struct st_range_seq_if
     SYNOPSIS
       skip_record()
         seq         The value returned by RANGE_SEQ_IF::init()
-        range_info  Information about the next range 
+        range_info  Information about the next range
                     (Ignored if MRR_NO_ASSOCIATION is set)
         rowid       Rowid of the record to be checked (ignored if set to 0)
-    
+
     RETURN
       1 - Record with this range_info and/or this rowid shall be filtered
           out from the stream of records returned by multi_range_read_next()
       0 - The record shall be left in the stream
-  */ 
+  */
   bool (*skip_record) (range_seq_t seq, range_id_t range_info, uchar *rowid);
 
   /*
@@ -2560,26 +2567,26 @@ typedef struct st_range_seq_if
     SYNOPSIS
       skip_index_tuple()
         seq         The value returned by RANGE_SEQ_IF::init()
-        range_info  Information about the next range 
-    
+        range_info  Information about the next range
+
     RETURN
       0 - The record combination satisfies the index condition
       1 - Otherwise
-  */ 
+  */
   bool (*skip_index_tuple) (range_seq_t seq, range_id_t range_info);
 } RANGE_SEQ_IF;
 
 typedef bool (*SKIP_INDEX_TUPLE_FUNC) (range_seq_t seq, range_id_t range_info);
 
 class Cost_estimate
-{ 
+{
 public:
   double io_count;     /* number of I/O                 */
   double avg_io_cost;  /* cost of an average I/O oper.  */
   double cpu_cost;     /* cost of operations in CPU     */
   double import_cost;  /* cost of remote operations     */
-  double mem_cost;     /* cost of used memory           */ 
-  
+  double mem_cost;     /* cost of used memory           */
+
   enum { IO_COEFF=1 };
   enum { CPU_COEFF=1 };
   enum { MEM_COEFF=1 };
@@ -2590,7 +2597,7 @@ public:
     reset();
   }
 
-  double total_cost() 
+  double total_cost()
   {
     return IO_COEFF*io_count*avg_io_cost + CPU_COEFF * cpu_cost +
            MEM_COEFF*mem_cost + IMPORT_COEFF*import_cost;
@@ -2635,7 +2642,7 @@ public:
     if (add_io_cnt > 0)
     {
       double io_count_sum= io_count + add_io_cnt;
-      avg_io_cost= (io_count * avg_io_cost + 
+      avg_io_cost= (io_count * avg_io_cost +
                     add_io_cnt * add_avg_cost) / io_count_sum;
       io_count= io_count_sum;
     }
@@ -2661,7 +2668,7 @@ public:
   }
 };
 
-void get_sweep_read_cost(TABLE *table, ha_rows nrows, bool interrupted, 
+void get_sweep_read_cost(TABLE *table, ha_rows nrows, bool interrupted,
                          Cost_estimate *cost);
 
 /*
@@ -2672,13 +2679,13 @@ void get_sweep_read_cost(TABLE *table, ha_rows nrows, bool interrupted,
 #define HA_MRR_SINGLE_POINT 1U
 #define HA_MRR_FIXED_KEY  2U
 
-/* 
+/*
   Indicates that RANGE_SEQ_IF::next(&range) doesn't need to fill in the
   'range' parameter.
 */
 #define HA_MRR_NO_ASSOCIATION 4U
 
-/* 
+/*
   The MRR user will provide ranges in key order, and MRR implementation
   must return rows in key order.
 */
@@ -2687,7 +2694,7 @@ void get_sweep_read_cost(TABLE *table, ha_rows nrows, bool interrupted,
 /* MRR implementation doesn't have to retrieve full records */
 #define HA_MRR_INDEX_ONLY 16U
 
-/* 
+/*
   The passed memory buffer is of maximum possible size, the caller can't
   assume larger buffer.
 */
@@ -2714,8 +2721,8 @@ void get_sweep_read_cost(TABLE *table, ha_rows nrows, bool interrupted,
   This can be used for optimization of the procedure that sorts these keys
   since in this case key values don't have to be copied into the MRR buffer.
 
-  In other words, it is guaranteed that after RANGE_SEQ_IF::next() call the 
-  pointer in range->start_key.key will point to a key value that will remain 
+  In other words, it is guaranteed that after RANGE_SEQ_IF::next() call the
+  pointer in range->start_key.key will point to a key value that will remain
   there until the end of the MRR scan.
 */
 #define HA_MRR_MATERIALIZED_KEYS 256U
@@ -2724,15 +2731,15 @@ void get_sweep_read_cost(TABLE *table, ha_rows nrows, bool interrupted,
   The following bits are reserved for use by MRR implementation. The intended
   use scenario:
 
-  * sql layer calls handler->multi_range_read_info[_const]() 
+  * sql layer calls handler->multi_range_read_info[_const]()
     - MRR implementation figures out what kind of scan it will perform, saves
       the result in *mrr_mode parameter.
   * sql layer remembers what was returned in *mrr_mode
 
-  * the optimizer picks the query plan (which may or may not include the MRR 
+  * the optimizer picks the query plan (which may or may not include the MRR
     scan that was estimated by the multi_range_read_info[_const] call)
 
-  * if the query is an EXPLAIN statement, sql layer will call 
+  * if the query is an EXPLAIN statement, sql layer will call
     handler->multi_range_read_explain_info(mrr_mode) to get a text description
     of the picked MRR scan; the description will be a part of EXPLAIN output.
 */
@@ -2772,7 +2779,7 @@ public:
   ulonglong delete_length;		/* Free bytes */
   ulonglong auto_increment_value;
   /*
-    The number of records in the table. 
+    The number of records in the table.
       0    - means the table has exactly 0 rows
     other  - if (table_flags() & HA_STATS_RECORDS_IS_EXACT)
                the value is the exact number of records in the table
@@ -2791,7 +2798,7 @@ public:
   /*
     number of buffer bytes that native mrr implementation needs,
   */
-  uint mrr_length_per_rec; 
+  uint mrr_length_per_rec;
 
   ha_statistics():
     data_file_length(0), max_data_file_length(0),
@@ -2843,31 +2850,31 @@ public:
   =================
   [Warning: this description is work in progress and may be incomplete]
   The table record is stored in a fixed-size buffer:
-   
+
     record: null_bytes, column1_data, column2_data, ...
-  
-  The offsets of the parts of the buffer are also fixed: every column has 
+
+  The offsets of the parts of the buffer are also fixed: every column has
   an offset to its column{i}_data, and if it is nullable it also has its own
-  bit in null_bytes. 
+  bit in null_bytes.
 
   The record buffer only includes data about columns that are marked in the
   relevant column set (table->read_set and/or table->write_set, depending on
-  the situation). 
+  the situation).
   <not-sure>It could be that it is required that null bits of non-present
   columns are set to 1</not-sure>
 
   VARIOUS EXCEPTIONS AND SPECIAL CASES
 
-  If the table has no nullable columns, then null_bytes is still 
-  present, its length is one byte <not-sure> which must be set to 0xFF 
+  If the table has no nullable columns, then null_bytes is still
+  present, its length is one byte <not-sure> which must be set to 0xFF
   at all times. </not-sure>
-  
+
   If the table has columns of type BIT, then certain bits from those columns
   may be stored in null_bytes as well. Grep around for Field_bit for
   details.
 
-  For blob columns (see Field_blob), the record buffer stores length of the 
-  data, following by memory pointer to the blob data. The pointer is owned 
+  For blob columns (see Field_blob), the record buffer stores length of the
+  data, following by memory pointer to the blob data. The pointer is owned
   by the storage engine and is valid until the next operation.
 
   If a blob column has NULL value, then its length and blob data pointer
@@ -2916,7 +2923,7 @@ public:
   bool check_table_binlog_row_based_result; /* cached check_table_binlog... */
   /* Set to 1 if handler logged last insert/update/delete operation */
   bool row_already_logged;
-  /* 
+  /*
     TRUE <=> the engine guarantees that returned records are within the range
     being scanned.
   */
@@ -3003,8 +3010,8 @@ public:
 
 private:
   /**
-    The lock type set by when calling::ha_external_lock(). This is 
-    propagated down to the storage engine. The reason for also storing 
+    The lock type set by when calling::ha_external_lock(). This is
+    propagated down to the storage engine. The reason for also storing
     it here, is that when doing MRR we need to create/clone a second handler
     object. This cloned handler object needs to know about the lock_type used.
   */
@@ -3056,7 +3063,7 @@ public:
     cached_table_flags= table_flags();
   }
   /* ha_ methods: pubilc wrappers for private virtual API */
-  
+
   int ha_open(TABLE *table, const char *name, int mode, uint test_if_locked,
               MEM_ROOT *mem_root= 0, List<String> *partitions_to_open=NULL);
   int ha_index_init(uint idx, bool sorted)
@@ -3237,11 +3244,11 @@ public:
   /**
      The cost of reading a set of ranges from the table using an index
      to access it.
-     
+
      @param index  The index number.
      @param ranges The number of ranges to be read.
      @param rows   Total number of rows to be read.
-     
+
      This method can be used to calculate the total cost of scanning a table
      using an index by calling it using read_time(index, 1, table_size).
   */
@@ -3535,15 +3542,15 @@ public:
     too?
   */
   virtual ha_rows multi_range_read_info_const(uint keyno, RANGE_SEQ_IF *seq,
-                                              void *seq_init_param, 
+                                              void *seq_init_param,
                                               uint n_ranges, uint *bufsz,
                                               uint *mrr_mode,
                                               Cost_estimate *cost);
   virtual ha_rows multi_range_read_info(uint keyno, uint n_ranges, uint keys,
-                                        uint key_parts, uint *bufsz, 
+                                        uint key_parts, uint *bufsz,
                                         uint *mrr_mode, Cost_estimate *cost);
   virtual int multi_range_read_init(RANGE_SEQ_IF *seq, void *seq_init_param,
-                                    uint n_ranges, uint mrr_mode, 
+                                    uint n_ranges, uint mrr_mode,
                                     HANDLER_BUFFER *buf);
   virtual int multi_range_read_next(range_id_t *range_info);
   /*
@@ -3552,7 +3559,7 @@ public:
     This is intended to be used for EXPLAIN, via the following scenario:
     1. SQL layer calls handler->multi_range_read_info().
     1.1. Storage engine figures out whether it will use some non-default
-         MRR strategy, sets appropritate bits in *mrr_mode, and returns 
+         MRR strategy, sets appropritate bits in *mrr_mode, and returns
          control to SQL layer
     2. SQL layer remembers the returned mrr_mode
     3. SQL layer compares various options and choses the final query plan. As
@@ -3565,10 +3572,10 @@ public:
 
     @param mrr_mode   Mode which was returned by multi_range_read_info[_const]
     @param str        INOUT string to be printed for EXPLAIN
-    @param str_end    End of the string buffer. The function is free to put the 
+    @param str_end    End of the string buffer. The function is free to put the
                       string into [str..str_end] memory range.
   */
-  virtual int multi_range_read_explain_info(uint mrr_mode, char *str, 
+  virtual int multi_range_read_explain_info(uint mrr_mode, char *str,
                                             size_t size)
   { return 0; }
 
@@ -3854,7 +3861,7 @@ public:
       anything
 
     This method offers the storage engine, the possibility to store a reference
-    to a table name which is going to be used with query cache. 
+    to a table name which is going to be used with query cache.
     The method is called each time a statement is written to the cache and can
     be used to verify if a specific statement is cacheable. It also offers
     the possibility to register a generic (but static) call back function which
@@ -3971,14 +3978,14 @@ public:
    @note
    The pushed conditions form a stack (from which one can remove the
    last pushed condition using cond_pop).
-   The table handler filters out rows using (pushed_cond1 AND pushed_cond2 
+   The table handler filters out rows using (pushed_cond1 AND pushed_cond2
    AND ... AND pushed_condN)
    or less restrictive condition, depending on handler's capabilities.
 
    handler->ha_reset() call empties the condition stack.
    Calls to rnd_init/rnd_end, index_init/index_end etc do not affect the
    condition stack.
- */ 
+ */
  virtual const COND *cond_push(const COND *cond) { return cond; };
  /**
    Pop the top condition from the condition stack of the handler instance.
@@ -4030,7 +4037,7 @@ public:
    index. The pushed index condition will only refer to fields from
    this handler that is contained in the index (but it may also refer
    to fields in other handlers). Before the handler evaluates the
-   condition it must read the content of the index entry into the 
+   condition it must read the content of the index entry into the
    record buffer.
 
    The handler is free to decide if and how much of the condition it
@@ -4340,7 +4347,7 @@ public:
   }
 
   virtual LEX_CSTRING *engine_name();
-  
+
   TABLE* get_table() { return table; }
   TABLE_SHARE* get_table_share() { return table_share; }
 protected:
@@ -4814,7 +4821,8 @@ int ha_commit_one_phase(THD *thd, bool all);
 int ha_commit_trans(THD *thd, bool all);
 int ha_rollback_trans(THD *thd, bool all);
 int ha_prepare(THD *thd);
-int ha_recover(HASH *commit_list);
+int ha_recover(HASH *commit_list, MEM_ROOT *mem_root= NULL);
+void ha_recover_binlog_truncate_complete(HASH *commit_list);
 
 /* transactions: these functions never call handlerton functions directly */
 int ha_enable_transaction(THD *thd, bool on);
@@ -4886,4 +4894,6 @@ int del_global_table_stat(THD *thd, const  LEX_CSTRING *db, const LEX_CSTRING *t
 @note This does not need to be multi-byte safe or anything */
 char *xid_to_str(char *buf, const XID &xid);
 #endif // !DBUG_OFF
+uint ha_count_rw(THD *thd, bool all);
+
 #endif /* HANDLER_INCLUDED */
