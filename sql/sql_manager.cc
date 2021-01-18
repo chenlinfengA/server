@@ -35,31 +35,31 @@ mysql_cond_t COND_manager;
 
 struct handler_cb {
    struct handler_cb *next;
-   void (*action)(void);
+   void (*action)(void *);
+   void *data;
 };
 
-static struct handler_cb * volatile cb_list;
+static struct handler_cb *cb_list; // protected by LOCK_manager
 
-bool mysql_manager_submit(void (*action)())
+bool mysql_manager_submit(void (*action)(void *), void *data)
 {
   bool result= FALSE;
   DBUG_ASSERT(manager_thread_in_use);
-  struct handler_cb * volatile *cb;
+  struct handler_cb **cb;
   mysql_mutex_lock(&LOCK_manager);
   cb= &cb_list;
-  while (*cb && (*cb)->action != action)
+  while (*cb)
     cb= &(*cb)->next;
+  *cb= (struct handler_cb *)my_malloc(sizeof(struct handler_cb), MYF(MY_WME));
   if (!*cb)
+    result= TRUE;
+  else
   {
-    *cb= (struct handler_cb *)my_malloc(sizeof(struct handler_cb), MYF(MY_WME));
-    if (!*cb)
-      result= TRUE;
-    else
-    {
-      (*cb)->next= NULL;
-      (*cb)->action= action;
-    }
+    (*cb)->next= NULL;
+    (*cb)->action= action;
+    (*cb)->data= data;
   }
+  mysql_cond_signal(&COND_manager);
   mysql_mutex_unlock(&LOCK_manager);
   return result;
 }
@@ -69,16 +69,12 @@ pthread_handler_t handle_manager(void *arg __attribute__((unused)))
   int error = 0;
   struct timespec abstime;
   bool reset_flush_time = TRUE;
-  struct handler_cb *cb= NULL;
   my_thread_init();
   DBUG_ENTER("handle_manager");
 
   pthread_detach_this_thread();
   manager_thread = pthread_self();
-  mysql_cond_init(key_COND_manager, &COND_manager,NULL);
-  mysql_mutex_init(key_LOCK_manager, &LOCK_manager, NULL);
-  manager_thread_in_use = 1;
-  for (;;)
+  while (!abort_manager)
   {
     mysql_mutex_lock(&LOCK_manager);
     /* XXX: This will need to be made more general to handle different
@@ -90,35 +86,30 @@ pthread_handler_t handle_manager(void *arg __attribute__((unused)))
 	set_timespec(abstime, flush_time);
         reset_flush_time = FALSE;
       }
-      while ((!error || error == EINTR) && !abort_manager)
+      while ((!error || error == EINTR) && !abort_manager && !cb_list)
         error= mysql_cond_timedwait(&COND_manager, &LOCK_manager, &abstime);
+
+      if (error == ETIMEDOUT || error == ETIME)
+      {
+        tc_purge();
+        error = 0;
+        reset_flush_time = TRUE;
+      }
     }
     else
     {
-      while ((!error || error == EINTR) && !abort_manager)
+      while ((!error || error == EINTR) && !abort_manager && !cb_list)
         error= mysql_cond_wait(&COND_manager, &LOCK_manager);
     }
-    if (cb == NULL)
-    {
-      cb= cb_list;
-      cb_list= NULL;
-    }
+
+    struct handler_cb *cb= cb_list;
+    cb_list= NULL;
     mysql_mutex_unlock(&LOCK_manager);
-
-    if (abort_manager)
-      break;
-
-    if (error == ETIMEDOUT || error == ETIME)
-    {
-      tc_purge();
-      error = 0;
-      reset_flush_time = TRUE;
-    }
 
     while (cb)
     {
       struct handler_cb *next= cb->next;
-      cb->action();
+      cb->action(cb->data);
       my_free(cb);
       cb= next;
     }
@@ -137,15 +128,15 @@ void start_handle_manager()
 {
   DBUG_ENTER("start_handle_manager");
   abort_manager = false;
-  if (flush_time && flush_time != ~(ulong) 0L)
   {
     pthread_t hThread;
-    int error;
-    if ((error= mysql_thread_create(key_thread_handle_manager,
-                                    &hThread, &connection_attrib,
-                                    handle_manager, 0)))
-      sql_print_warning("Can't create handle_manager thread (errno= %d)",
-                        error);
+    int err;
+    manager_thread_in_use = 1;
+    mysql_cond_init(key_COND_manager, &COND_manager,NULL);
+    mysql_mutex_init(key_LOCK_manager, &LOCK_manager, NULL);
+    if ((err= mysql_thread_create(key_thread_handle_manager, &hThread,
+                                  &connection_attrib, handle_manager, 0)))
+      sql_print_warning("Can't create handle_manager thread (errno: %M)", err);
   }
   DBUG_VOID_RETURN;
 }
