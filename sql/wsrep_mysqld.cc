@@ -38,6 +38,7 @@
 #include <cstdlib>
 #include "log_event.h"
 #include "sql_plugin.h"                         /* wsrep_plugins_pre_init() */
+#include "sql_manager.h"
 #include <vector>
 
 wsrep_t *wsrep                  = NULL;
@@ -147,7 +148,7 @@ PSI_mutex_key key_LOCK_wsrep_rollback,
   key_LOCK_wsrep_replaying, key_LOCK_wsrep_ready, key_LOCK_wsrep_sst,
   key_LOCK_wsrep_sst_thread, key_LOCK_wsrep_sst_init,
   key_LOCK_wsrep_slave_threads, key_LOCK_wsrep_desync,
-  key_LOCK_wsrep_config_state;
+  key_LOCK_wsrep_config_state, key_LOCK_wsrep_data;
 
 PSI_cond_key key_COND_wsrep_rollback,
   key_COND_wsrep_replaying, key_COND_wsrep_ready, key_COND_wsrep_sst,
@@ -157,6 +158,7 @@ PSI_file_key key_file_wsrep_gra_log;
 
 static PSI_mutex_info wsrep_mutexes[]=
 {
+  { &key_LOCK_thd_data, "THD::LOCK_thd_data", 0},
   { &key_LOCK_wsrep_ready, "LOCK_wsrep_ready", PSI_FLAG_GLOBAL},
   { &key_LOCK_wsrep_sst, "LOCK_wsrep_sst", PSI_FLAG_GLOBAL},
   { &key_LOCK_wsrep_sst_thread, "wsrep_sst_thread", 0},
@@ -2688,13 +2690,13 @@ wsrep_ws_handle_t* wsrep_thd_ws_handle(THD *thd)
 
 void wsrep_thd_LOCK(THD *thd)
 {
-  mysql_mutex_lock(&thd->LOCK_thd_data);
+  mysql_mutex_lock(&thd->LOCK_wsrep_data);
 }
 
 
 void wsrep_thd_UNLOCK(THD *thd)
 {
-  mysql_mutex_unlock(&thd->LOCK_thd_data);
+  mysql_mutex_unlock(&thd->LOCK_wsrep_data);
 }
 
 
@@ -2758,13 +2760,20 @@ extern "C" void wsrep_thd_set_wsrep_last_query_id(THD *thd, query_id_t id)
 }
 
 
+static void wsrep_kill_thd(void *victim)
+{
+  THD *to_kill=(THD*)victim;
+  mysql_mutex_lock(&to_kill->LOCK_thd_data);
+  to_kill->awake(KILL_QUERY);
+  mysql_mutex_unlock(&to_kill->LOCK_thd_data);
+}
+
+
 extern "C" void wsrep_thd_awake(THD *thd, my_bool signal)
 {
   if (signal)
   {
-    mysql_mutex_lock(&thd->LOCK_thd_data);
-    thd->awake(KILL_QUERY);
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    mysql_manager_submit(wsrep_kill_thd, thd);
   }
   else
   {

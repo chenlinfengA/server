@@ -278,6 +278,7 @@ extern PSI_mutex_key key_LOCK_wsrep_replaying;
 extern PSI_cond_key  key_COND_wsrep_replaying;
 extern PSI_mutex_key key_LOCK_wsrep_slave_threads;
 extern PSI_mutex_key key_LOCK_wsrep_desync;
+extern PSI_mutex_key key_LOCK_wsrep_data;
 
 extern PSI_file_key key_file_wsrep_gra_log;
 
