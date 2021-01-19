@@ -199,7 +199,7 @@ static void wsrep_return_from_bf_mode(THD *thd, struct wsrep_thd_shadow* shadow)
 void wsrep_replay_sp_transaction(THD* thd)
 {
   DBUG_ENTER("wsrep_replay_sp_transaction");
-  mysql_mutex_assert_owner(&thd->LOCK_wsrep_data);
+  mysql_mutex_assert_owner(&thd->LOCK_thd_data);
   DBUG_ASSERT(thd->wsrep_conflict_state == MUST_REPLAY);
   DBUG_ASSERT(wsrep_thd_trx_seqno(thd) > 0);
 

@@ -4428,7 +4428,6 @@ public:
   }
 
 #ifdef WITH_WSREP
-  mysql_mutex_t             LOCK_wsrep_data;
   const bool                wsrep_applier; /* dedicated slave applier thread */
   bool                      wsrep_applier_closing; /* applier marked to close */
   bool                      wsrep_client_thread; /* to identify client threads*/

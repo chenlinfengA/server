@@ -776,8 +776,6 @@ THD::THD(my_thread_id id, bool is_wsrep_applier)
   *scramble= '\0';
 
 #ifdef WITH_WSREP
-  mysql_mutex_init(key_LOCK_wsrep_data, &LOCK_wsrep_data, MY_MUTEX_INIT_FAST);
-  mysql_mutex_record_order(&LOCK_thd_data, &LOCK_wsrep_data); // MDEV-23328
   wsrep_ws_handle.trx_id = WSREP_UNDEFINED_TRX_ID;
   wsrep_ws_handle.opaque = NULL;
   wsrep_retry_counter     = 0;
@@ -1519,7 +1517,6 @@ THD::~THD()
 
 #ifdef WITH_WSREP
   delete wsrep_rgi;
-  mysql_mutex_destroy(&LOCK_wsrep_data);
 #endif
   if (!free_connection_done)
     free_connection();
