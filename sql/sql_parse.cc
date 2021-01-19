@@ -1205,13 +1205,13 @@ bool do_command(THD *thd)
 #ifdef WITH_WSREP
   if (WSREP(thd))
   {
-    mysql_mutex_lock(&thd->LOCK_thd_data);
+    wsrep_thd_LOCK(thd);
     wsrep_thd_set_query_state(thd, QUERY_IDLE);
     if (thd->wsrep_conflict_state==MUST_ABORT)
     {
       wsrep_client_rollback(thd);
     }
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    wsrep_thd_UNLOCK(thd);
   }
 #endif /* WITH_WSREP */
 
@@ -1257,15 +1257,15 @@ bool do_command(THD *thd)
   packet_length= my_net_read_packet(net, 1);
 #ifdef WITH_WSREP
   if (WSREP(thd)) {
-    mysql_mutex_lock(&thd->LOCK_thd_data);
+    wsrep_thd_LOCK(thd);
 
     /* these THD's are aborted or are aborting during being idle */
     if (thd->wsrep_conflict_state == ABORTING)
     {
       while (thd->wsrep_conflict_state == ABORTING) {
-        mysql_mutex_unlock(&thd->LOCK_thd_data);
+        wsrep_thd_UNLOCK(thd);
         my_sleep(1000);
-        mysql_mutex_lock(&thd->LOCK_thd_data);
+        wsrep_thd_LOCK(thd);
       }
       thd->store_globals();
     }
@@ -1275,7 +1275,7 @@ bool do_command(THD *thd)
     }
 
     wsrep_thd_set_query_state(thd, QUERY_EXEC);
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    wsrep_thd_UNLOCK(thd);
   }
 #endif /* WITH_WSREP */
 
@@ -1288,14 +1288,14 @@ bool do_command(THD *thd)
 #ifdef WITH_WSREP
     if (WSREP(thd))
     {
-      mysql_mutex_lock(&thd->LOCK_thd_data);
+      wsrep_thd_LOCK(thd);
       if (thd->wsrep_conflict_state == MUST_ABORT)
       {
         DBUG_PRINT("wsrep",("aborted for wsrep rollback: %lu",
                    (long unsigned int) thd->real_id));
         wsrep_client_rollback(thd);
       }
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
     }
 #endif /* WITH_WSREP */
 
@@ -1571,7 +1571,7 @@ bool dispatch_command(enum enum_server_command command, THD *thd,
       thd->wsrep_PA_safe= true;
     }
 
-    mysql_mutex_lock(&thd->LOCK_thd_data);
+    wsrep_thd_LOCK(thd);
     wsrep_thd_set_query_state(thd, QUERY_EXEC);
     if (thd->wsrep_conflict_state== RETRY_AUTOCOMMIT)
     {
@@ -1585,7 +1585,7 @@ bool dispatch_command(enum enum_server_command command, THD *thd,
     if (thd->wsrep_conflict_state == ABORTED &&
         command != COM_STMT_CLOSE && command != COM_QUIT)
     {
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
       my_message(ER_LOCK_DEADLOCK, "Deadlock: wsrep aborted transaction",
                  MYF(0));
       WSREP_DEBUG("Deadlock error for: %s", thd->query());
@@ -1595,7 +1595,7 @@ bool dispatch_command(enum enum_server_command command, THD *thd,
       thd->wsrep_retry_counter  = 0;
       goto dispatch_end;
     }
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    wsrep_thd_UNLOCK(thd);
   }
 #endif /* WITH_WSREP */
 #if defined(ENABLED_PROFILING)
@@ -2360,11 +2360,11 @@ com_multi_end:
     DBUG_ASSERT((command != COM_QUIT && command != COM_STMT_CLOSE)
                   || thd->get_stmt_da()->is_disabled());
     /* wsrep BF abort in query exec phase */
-    mysql_mutex_lock(&thd->LOCK_thd_data);
+    wsrep_thd_LOCK(thd);
     do_end_of_statement= thd->wsrep_conflict_state != REPLAYING &&
                          thd->wsrep_conflict_state != RETRY_AUTOCOMMIT &&
                          !thd->killed;
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    wsrep_thd_UNLOCK(thd);
   }
   else
     do_end_of_statement= true;
@@ -7557,7 +7557,7 @@ static void wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
 
     if (WSREP(thd)) {
       /* wsrep BF abort in query exec phase */
-      mysql_mutex_lock(&thd->LOCK_thd_data);
+      wsrep_thd_LOCK(thd);
       if (thd->wsrep_conflict_state == MUST_ABORT) {
         wsrep_client_rollback(thd);
 
@@ -7566,10 +7566,10 @@ static void wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
 
       if (thd->wsrep_conflict_state == MUST_REPLAY)
       {
-        mysql_mutex_unlock(&thd->LOCK_thd_data);
+        wsrep_thd_UNLOCK(thd);
 	if (thd->lex->explain)
           delete_explain_query(thd->lex);
-        mysql_mutex_lock(&thd->LOCK_thd_data);
+        wsrep_thd_LOCK(thd);
 
         wsrep_replay_transaction(thd);
       }
@@ -7583,7 +7583,7 @@ static void wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
             thd->lex->sql_command != SQLCOM_SELECT  &&
             (thd->wsrep_retry_counter < thd->variables.wsrep_retry_autocommit))
         {
-          mysql_mutex_unlock(&thd->LOCK_thd_data);
+          wsrep_thd_UNLOCK(thd);
           WSREP_DEBUG("wsrep retrying AC query: %s",
                       (thd->query()) ? thd->query() : "void");
 
@@ -7591,21 +7591,19 @@ static void wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
 	  MYSQL_END_STATEMENT(thd->m_statement_psi, thd->get_stmt_da());
 	  thd->m_statement_psi= NULL;
           thd->m_digest= NULL;
-	  // Released thd->LOCK_thd_data above as below could end up
-	  // close_thread_tables()/close_open_tables()/close_thread_table()/mysql_mutex_lock(&thd->LOCK_thd_data)
           close_thread_tables(thd);
 
-	  mysql_mutex_lock(&thd->LOCK_thd_data);
+	  wsrep_thd_LOCK(thd);
           thd->wsrep_conflict_state= RETRY_AUTOCOMMIT;
           thd->wsrep_retry_counter++;            // grow
           wsrep_copy_query(thd);
           thd->set_time();
           parser_state->reset(rawbuf, length);
-          mysql_mutex_unlock(&thd->LOCK_thd_data);
+          wsrep_thd_UNLOCK(thd);
         }
         else
         {
-          mysql_mutex_unlock(&thd->LOCK_thd_data);
+          wsrep_thd_UNLOCK(thd);
 	  // This does dirty read to wsrep variables but it is only a debug code
           WSREP_DEBUG("%s, thd: %lld is_AC: %d, retry: %lu - %lu SQL: %s",
                       (thd->wsrep_conflict_state == ABORTED) ?
@@ -7616,11 +7614,11 @@ static void wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
           my_message(ER_LOCK_DEADLOCK, "Deadlock: wsrep aborted transaction",
                      MYF(0));
 
-	  mysql_mutex_lock(&thd->LOCK_thd_data);
+	  wsrep_thd_LOCK(thd);
           thd->wsrep_conflict_state= NO_CONFLICT;
           if (thd->wsrep_conflict_state != REPLAYING)
             thd->wsrep_retry_counter= 0;             //  reset
-	  mysql_mutex_unlock(&thd->LOCK_thd_data);
+	  wsrep_thd_UNLOCK(thd);
         }
 
         thd->reset_killed();
@@ -7628,7 +7626,7 @@ static void wsrep_mysql_parse(THD *thd, char *rawbuf, uint length,
       else
       {
         set_if_smaller(thd->wsrep_retry_counter, 0); // reset; eventually ok
-        mysql_mutex_unlock(&thd->LOCK_thd_data);
+        wsrep_thd_UNLOCK(thd);
       }
     }
 

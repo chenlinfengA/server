@@ -1341,9 +1341,9 @@ void do_handle_one_connection(CONNECT *connect)
 #ifdef WITH_WSREP
   if (WSREP(thd))
   {
-    mysql_mutex_lock(&thd->LOCK_thd_data);
+    wsrep_thd_LOCK(thd);
     wsrep_thd_set_query_state(thd, QUERY_EXITING);
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    wsrep_thd_UNLOCK(thd);
   }
 #endif
 end_thread:

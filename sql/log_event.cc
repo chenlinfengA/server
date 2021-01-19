@@ -8557,14 +8557,14 @@ int Xid_log_event::do_apply_event(rpl_group_info *rgi)
   thd->release_transactional_locks();
 
 #ifdef WITH_WSREP
-  if (WSREP(thd)) mysql_mutex_lock(&thd->LOCK_thd_data);
+  if (WSREP(thd)) wsrep_thd_LOCK(thd);
   if ((!res || (WSREP(thd) && thd->wsrep_conflict_state == MUST_REPLAY)) && sub_id)
 #else
   if (!res && sub_id)
 #endif /* WITH_WSREP */
     rpl_global_gtid_slave_state->update_state_hash(sub_id, &gtid, rgi);
 #ifdef WITH_WSREP
-  if (WSREP(thd)) mysql_mutex_unlock(&thd->LOCK_thd_data);
+  if (WSREP(thd)) wsrep_thd_UNLOCK(thd);
 #endif /* WITH_WSREP */
 
   /*

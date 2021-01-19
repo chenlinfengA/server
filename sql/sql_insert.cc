@@ -4594,17 +4594,17 @@ bool select_create::send_eof()
     if (WSREP_ON)
     {
       thd->get_stmt_da()->set_overwrite_status(FALSE);
-      mysql_mutex_lock(&thd->LOCK_thd_data);
+      wsrep_thd_LOCK(thd);
       if (thd->wsrep_conflict_state != NO_CONFLICT)
       {
         WSREP_DEBUG("select_create commit failed, thd: %lld  err: %d %s",
                     (longlong) thd->thread_id, thd->wsrep_conflict_state,
                     thd->query());
-        mysql_mutex_unlock(&thd->LOCK_thd_data);
+        wsrep_thd_UNLOCK(thd);
         abort_result_set();
         DBUG_RETURN(true);
       }
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
     }
 #endif /* WITH_WSREP */
   }

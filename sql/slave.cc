@@ -3472,7 +3472,7 @@ apply_event_and_update_pos_apply(Log_event* ev, THD* thd, rpl_group_info *rgi,
     case NO_CONFLICT: break;
     case MUST_REPLAY:
       WSREP_DEBUG("SQL apply failed for MUST_REPLAY, res %d", exec_res);
-      mysql_mutex_lock(&thd->LOCK_thd_data);
+      wsrep_thd_LOCK(thd);
       wsrep_replay_transaction(thd);
       switch (thd->wsrep_conflict_state) {
       case NO_CONFLICT:
@@ -3483,7 +3483,7 @@ apply_event_and_update_pos_apply(Log_event* ev, THD* thd, rpl_group_info *rgi,
 	WSREP_WARN("unexpected result of slave transaction replaying: %lld, %d",
 		   thd->thread_id, thd->wsrep_conflict_state);
       }
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
       break;
     default:
       WSREP_DEBUG("SQL apply failed, res %d conflict state: %d",
@@ -3946,10 +3946,10 @@ static int exec_relay_log_event(THD* thd, Relay_log_info* rli,
       DBUG_RETURN(1);
 
 #ifdef WITH_WSREP
-    mysql_mutex_lock(&thd->LOCK_thd_data);
+    wsrep_thd_LOCK(thd);
     if (thd->wsrep_conflict_state == NO_CONFLICT)
     {
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
 #endif /* WITH_WSREP */
     if (slave_trans_retries)
     {
@@ -4026,7 +4026,7 @@ static int exec_relay_log_event(THD* thd, Relay_log_info* rli,
 #ifdef WITH_WSREP
     }
     else
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
 #endif /* WITH_WSREP */
 
     thread_safe_increment64(&rli->executed_entries);

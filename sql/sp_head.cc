@@ -1327,7 +1327,7 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
 #ifdef WITH_WSREP
     if (m_type == TYPE_ENUM_PROCEDURE)
     {
-      mysql_mutex_lock(&thd->LOCK_thd_data);
+      wsrep_thd_LOCK(thd);
       if (thd->wsrep_conflict_state == MUST_REPLAY)
       {
         wsrep_replay_sp_transaction(thd);
@@ -1350,7 +1350,7 @@ sp_head::execute(THD *thd, bool merge_da_on_success)
         thd->wsrep_conflict_state= NO_CONFLICT;
         thd->killed= NOT_KILLED;
       }
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
     }
 #endif /* WITH_WSREP */
 #ifdef WITH_WSREP_NO

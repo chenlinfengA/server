@@ -48,7 +48,6 @@ int wsrep_show_bf_aborts (THD *thd, SHOW_VAR *var, char *buff,
   return 0;
 }
 
-/* must have (&thd->LOCK_thd_data) */
 void wsrep_client_rollback(THD *thd)
 {
   WSREP_DEBUG("client rollback due to BF abort for (%lld), query: %s",
@@ -57,7 +56,7 @@ void wsrep_client_rollback(THD *thd)
   WSREP_ATOMIC_ADD_LONG(&wsrep_bf_aborts_counter, 1);
 
   thd->wsrep_conflict_state= ABORTING;
-  mysql_mutex_unlock(&thd->LOCK_thd_data);
+  wsrep_thd_UNLOCK(thd);
   trans_rollback(thd);
 
   if (thd->locked_tables_mode && thd->lock)
@@ -87,7 +86,7 @@ void wsrep_client_rollback(THD *thd)
                 (longlong) thd->thread_id);
     thd->clear_binlog_table_maps();
   }
-  mysql_mutex_lock(&thd->LOCK_thd_data);
+  wsrep_thd_LOCK(thd);
   thd->wsrep_conflict_state= ABORTED;
 }
 
@@ -200,7 +199,7 @@ static void wsrep_return_from_bf_mode(THD *thd, struct wsrep_thd_shadow* shadow)
 void wsrep_replay_sp_transaction(THD* thd)
 {
   DBUG_ENTER("wsrep_replay_sp_transaction");
-  mysql_mutex_assert_owner(&thd->LOCK_thd_data);
+  mysql_mutex_assert_owner(&thd->LOCK_wsrep_data);
   DBUG_ASSERT(thd->wsrep_conflict_state == MUST_REPLAY);
   DBUG_ASSERT(wsrep_thd_trx_seqno(thd) > 0);
 
@@ -215,7 +214,7 @@ void wsrep_replay_sp_transaction(THD* thd)
   }
   thd->release_transactional_locks();
 
-  mysql_mutex_unlock(&thd->LOCK_thd_data);
+  wsrep_thd_UNLOCK(thd);
   THD *replay_thd= new THD(true);
   replay_thd->thread_stack= thd->thread_stack;
 
@@ -239,7 +238,7 @@ void wsrep_replay_sp_transaction(THD* thd)
   replay_thd->reset_globals();
   delete replay_thd;
 
-  mysql_mutex_lock(&thd->LOCK_thd_data);
+  wsrep_thd_LOCK(thd);
 
   thd->store_globals();
 
@@ -283,7 +282,7 @@ void wsrep_replay_sp_transaction(THD* thd)
                 (thd->db ? thd->db : "(null)"),
                 WSREP_QUERY(thd));
     /* we're now in inconsistent state, must abort */
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    wsrep_thd_UNLOCK(thd);
     unireg_abort(1);
     break;
   }
@@ -340,7 +339,7 @@ void wsrep_replay_transaction(THD *thd)
       thd->get_stmt_da()->reset_diagnostics_area();
 
       thd->wsrep_conflict_state= REPLAYING;
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
 
       thd->reset_for_next_command();
       thd->reset_killed();
@@ -393,7 +392,7 @@ void wsrep_replay_transaction(THD *thd)
       if (thd->wsrep_conflict_state!= REPLAYING)
         WSREP_WARN("lost replaying mode: %d", thd->wsrep_conflict_state );
 
-      mysql_mutex_lock(&thd->LOCK_thd_data);
+      wsrep_thd_LOCK(thd);
 
       switch (rcode)
       {
@@ -451,7 +450,7 @@ void wsrep_replay_transaction(THD *thd)
         /* we're now in inconsistent state, must abort */
 
         /* http://bazaar.launchpad.net/~codership/codership-mysql/5.6/revision/3962#sql/wsrep_thd.cc */
-        mysql_mutex_unlock(&thd->LOCK_thd_data);
+        wsrep_thd_UNLOCK(thd);
 
         unireg_abort(1);
         break;
@@ -657,30 +656,30 @@ static void wsrep_rollback_process(THD *thd)
        */
       mysql_mutex_unlock(&LOCK_wsrep_rollback);
 
-      mysql_mutex_lock(&aborting->LOCK_thd_data);
+      wsrep_thd_LOCK(aborting);
       if (aborting->wsrep_conflict_state== ABORTED)
       {
         WSREP_DEBUG("WSREP, thd already aborted: %llu state: %d",
                     (long long)aborting->real_id,
                     aborting->wsrep_conflict_state);
 
-        mysql_mutex_unlock(&aborting->LOCK_thd_data);
+        wsrep_thd_UNLOCK(aborting);
         mysql_mutex_lock(&LOCK_wsrep_rollback);
         continue;
       }
       aborting->wsrep_conflict_state= ABORTING;
 
-      mysql_mutex_unlock(&aborting->LOCK_thd_data);
+      wsrep_thd_UNLOCK(aborting);
 
       set_current_thd(aborting); 
       aborting->store_globals();
 
-      mysql_mutex_lock(&aborting->LOCK_thd_data);
+      wsrep_thd_LOCK(aborting);
       wsrep_client_rollback(aborting);
       WSREP_DEBUG("WSREP rollbacker aborted thd: (%lld %lld)",
                   (longlong) aborting->thread_id,
                   (longlong) aborting->real_id);
-      mysql_mutex_unlock(&aborting->LOCK_thd_data);
+      wsrep_thd_UNLOCK(aborting);
 
       set_current_thd(thd); 
       thd->store_globals();
@@ -732,10 +731,10 @@ enum wsrep_conflict_state wsrep_thd_conflict_state(THD *thd, my_bool sync)
   enum wsrep_conflict_state state = NO_CONFLICT;
   if (thd)
   {
-    if (sync) mysql_mutex_lock(&thd->LOCK_thd_data);
+    if (sync) wsrep_thd_LOCK(thd);
     
     state = thd->wsrep_conflict_state;
-    if (sync) mysql_mutex_unlock(&thd->LOCK_thd_data);
+    if (sync) wsrep_thd_UNLOCK(thd);
   }
   return state;
 }
@@ -759,12 +758,12 @@ my_bool wsrep_thd_is_BF(THD *thd, my_bool sync)
     if (wsrep_thd_is_wsrep(thd))
     {
       if (sync)
-	mysql_mutex_lock(&thd->LOCK_thd_data);
+	wsrep_thd_LOCK(thd);
 
       status = ((thd->wsrep_exec_mode == REPL_RECV)    ||
       	        (thd->wsrep_exec_mode == TOTAL_ORDER));
       if (sync)
-        mysql_mutex_unlock(&thd->LOCK_thd_data);
+        wsrep_thd_UNLOCK(thd);
     }
   }
   return status;
@@ -777,12 +776,12 @@ my_bool wsrep_thd_is_BF_or_commit(void *thd_ptr, my_bool sync)
   if (thd_ptr) 
   {
     THD* thd = (THD*)thd_ptr;
-    if (sync) mysql_mutex_lock(&thd->LOCK_thd_data);
+    if (sync) wsrep_thd_LOCK(thd);
     
     status = ((thd->wsrep_exec_mode == REPL_RECV)    ||
 	      (thd->wsrep_exec_mode == TOTAL_ORDER)  ||
 	      (thd->wsrep_exec_mode == LOCAL_COMMIT));
-    if (sync) mysql_mutex_unlock(&thd->LOCK_thd_data);
+    if (sync) wsrep_thd_UNLOCK(thd);
   }
   return status;
 }
@@ -794,10 +793,10 @@ my_bool wsrep_thd_is_local(void *thd_ptr, my_bool sync)
   if (thd_ptr) 
   {
     THD* thd = (THD*)thd_ptr;
-    if (sync) mysql_mutex_lock(&thd->LOCK_thd_data);
+    if (sync) wsrep_thd_LOCK(thd);
 
     status = (thd->wsrep_exec_mode == LOCAL_STATE);
-    if (sync) mysql_mutex_unlock(&thd->LOCK_thd_data);
+    if (sync) wsrep_thd_UNLOCK(thd);
   }
   return status;
 }

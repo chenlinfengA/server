@@ -4470,7 +4470,7 @@ reexecute:
 
   if (WSREP_ON)
   {
-    mysql_mutex_lock(&thd->LOCK_thd_data);
+    wsrep_thd_LOCK(thd);
     switch (thd->wsrep_conflict_state)
     {
       case CERT_FAILURE:
@@ -4487,7 +4487,7 @@ reexecute:
       default:
         break;
     }
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    wsrep_thd_UNLOCK(thd);
   }
 #endif /* WITH_WSREP */
 
@@ -4665,7 +4665,7 @@ reexecute:
 
     if (WSREP_ON)
     {
-      mysql_mutex_lock(&thd->LOCK_thd_data);
+      wsrep_thd_LOCK(thd);
       switch (thd->wsrep_conflict_state)
       {
       case CERT_FAILURE:
@@ -4682,7 +4682,7 @@ reexecute:
       default:
         break;
       }
-      mysql_mutex_unlock(&thd->LOCK_thd_data);
+      wsrep_thd_UNLOCK(thd);
     }
 #endif /* WITH_WSREP */
 
