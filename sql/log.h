@@ -43,8 +43,7 @@ bool stmt_has_updated_non_trans_table(const THD* thd);
 class TC_LOG
 {
   public:
-  int using_heuristic_recover(const char* opt_name);
-  virtual int heuristic_binlog_rollback(HASH *commit_hash) { return 0; };
+  int using_heuristic_recover();
   TC_LOG() {}
   virtual ~TC_LOG() {}
 
@@ -714,7 +713,6 @@ public:
   void commit_checkpoint_notify(void *cookie);
   int recover(LOG_INFO *linfo, const char *last_log_name, IO_CACHE *first_log,
               Format_description_log_event *fdle, bool do_xa);
-  int heuristic_binlog_rollback(HASH *commit_hash);
   int do_binlog_recovery(const char *opt_name, bool do_xa_recovery);
 #if !defined(MYSQL_CLIENT)
 
@@ -864,9 +862,8 @@ public:
   int open_purge_index_file(bool destroy);
   bool truncate_and_remove_binlogs(const char *truncate_file,
                                    my_off_t truncate_pos,
+                                   rpl_gtid *gtid,
                                    enum_binlog_checksum_alg cs_alg);
-  int get_binlog_checkpoint_file(char* checkpoint_file,
-                                 Format_description_log_event **out_fdle);
   bool is_inited_purge_index_file();
   int close_purge_index_file();
   int clean_purge_index_file();

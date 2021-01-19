@@ -57,6 +57,8 @@ EOF
 #
 # Server restart
 #
+# TODO: probably remove
+#
 # The purpose of debug_dbug's "d,skip_new_binlog_create" is to avoid
 # binlog rotation at the end of heuristic recovery\footnote{When the
 # simulated error occured for a real user she would have to manually
