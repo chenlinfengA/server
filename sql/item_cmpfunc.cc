@@ -1327,7 +1327,8 @@ bool Item_in_optimizer::fix_left(THD *thd)
     args[0]= (*ref0);
   DBUG_PRINT("info", ("actual fix fields"));
 
-  cache->setup(thd, args[0]);
+  if (cache->setup(thd, args[0]))
+    DBUG_RETURN(true);
   if (cache->cols() == 1)
   {
     DBUG_ASSERT(args[0]->type() != ROW_ITEM);
@@ -1596,7 +1597,7 @@ longlong Item_in_optimizer::val_int()
     DBUG_RETURN(res);
   }
 
-  if (cache->null_value)
+  if (cache->null_value_inside)
   {
      DBUG_PRINT("info", ("Left NULL..."));
     /*
