@@ -1772,6 +1772,8 @@ static void close_connections(void)
     server_threads.iterate(warn_threads_active_after_phase_1);
 
 #ifdef WITH_WSREP
+  WSREP_DEBUG("Shutdown wsrep_inited %d wsrep_sst_auth %p", wsrep_inited, wsrep_sst_auth);
+
   if (wsrep_inited == 1)
   {
     wsrep_deinit(true);
