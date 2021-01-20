@@ -5,22 +5,15 @@
 # ==== Implementation ====
 #
 # Steps:
-#    0 - Create a table in innodb engine and execute FLUSH LOGS command to
-#        generate a new binary log.
-#    1 - Set max_binlog_size= 4096. Insert a row such that the max_binlog_size
-#        is reached and binary log gets rotated.
-#    2 - Using debug simulation make the server crash at a point where the DML
-#        transaction is written to binary log but not committed in engine.
-#    3 - At the time of crash three binary logs will be there
-#        master-bin.0000001, master-bin.000002 and master-bin.000003.
-#    4 - Restart server with --tc-heuristic-recover=BINLOG_TRUNCATE
-#    5 - Since the prepared DML in master-bin.000002 the binary log will be
-#        truncated and master-bin.000003 will be removed.
+#    1 - Set max_binlog_size= 4096, to help a series of inserts into a
+#        transaction table 'ti' get binlog rotated so many time while the
+#        transactions won't be committed, being stopped at
+#        a prior to commit debug_sync point
+#    2 - kill and restart the server as semisync slave successfully to
+#        end with an expected first binlog and the gtid state.
 #
 # ==== References ====
-#
-# MDEV-21117: --tc-heuristic-recover=rollback is not replication safe
-
+# MDEV-21117: recovery for --rpl-semi-sync-slave-enabled server
 
 --source include/have_innodb.inc
 --source include/have_log_bin.inc
@@ -28,31 +21,39 @@
 --source include/have_debug_sync.inc
 --source include/have_binlog_format_row.inc
 
-SET @old_max_binlog_size= @@GLOBAL.max_binlog_size;
-SET GLOBAL max_binlog_size= 4096;
-call mtr.add_suppression("Can't init tc log");
+call mtr.add_suppression("Can.t init tc log");
 call mtr.add_suppression("Aborting");
 
+--let $old_max_binlog_size= `select @@global.max_binlog_size`
+SET @@global.max_binlog_size= 4096;
+
 RESET MASTER;
-
-CREATE TABLE t1 (a INT PRIMARY KEY, b MEDIUMTEXT) ENGINE=Innodb;
 FLUSH LOGS;
-connect(master1,localhost,root,,);
-connect(master2,localhost,root,,);
+CREATE TABLE ti (a INT PRIMARY KEY, b MEDIUMTEXT) ENGINE=Innodb;
+CREATE TABLE tm (a INT PRIMARY KEY, b MEDIUMTEXT) ENGINE=MyISAM;
 
---connection master1
-# Hold insert after write to binlog and before "run_commit_ordered" in engine.
-# Use "commit_after_release_LOCK_log" sync point. This point is reached after
-# the binary log end position is updated which actually triggers binlog to be
-# rotated.
+connect(master1,localhost,root,,);
 --echo "List of binary logs before rotation"
 --source include/show_binary_logs.inc
-SET DEBUG_SYNC= "commit_after_release_LOCK_log SIGNAL con1_ready WAIT_FOR con1_go";
-send INSERT INTO t1 VALUES (2, REPEAT("x", 4100));
 
---connection master2
-SET DEBUG_SYNC= "now WAIT_FOR con1_ready";
---echo "List of binary logs after rotation"
+# Some load to either non- and transactional egines
+# that should not affect the following recovery:
+INSERT INTO ti VALUES(1,"I am gonna survive");
+INSERT INTO tm VALUES(1,"me too!");
+
+# hold on near engine commit
+SET DEBUG_SYNC= "commit_after_release_LOCK_after_binlog_sync SIGNAL master1_ready WAIT_FOR con1_go";
+--send_eval INSERT INTO ti VALUES (2, REPEAT("x", 4100))
+
+connect(master2,localhost,root,,);
+# The 2nd trx for recovery, it does not rotate binlog
+SET DEBUG_SYNC= "now WAIT_FOR master1_ready";
+SET DEBUG_SYNC= "commit_before_get_LOCK_commit_ordered SIGNAL master2_ready WAIT_FOR master2_go";
+--send_eval INSERT INTO ti VALUES (3, "not gonna survive")
+
+--connection default
+SET DEBUG_SYNC= "now WAIT_FOR master2_ready";
+--echo "List of binary logs before crash"
 --source include/show_binary_logs.inc
 --write_file $MYSQLTEST_VARDIR/tmp/mysqld.1.expect
 wait
@@ -65,24 +66,20 @@ EOF
 # Server restart
 #
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.1.expect
-restart: --tc-heuristic-recover=BINLOG_TRUNCATE
-EOF
---source include/wait_until_disconnected.inc
-
---append_file $MYSQLTEST_VARDIR/tmp/mysqld.1.expect
-restart:
+restart: --rpl-semi-sync-slave-enabled=1
 EOF
 
 connection default;
 --enable_reconnect
 --source include/wait_until_connected_again.inc
 
---echo "Zero rows should be present in table"
-SELECT COUNT(*) FROM t1;
+--echo "One record should be present in table"
+SELECT count(*) FROM ti;
 
-SELECT @@GLOBAL.gtid_current_pos;
+SELECT @@global.gtid_binlog_state;
 
-DROP TABLE t1;
-SELECT @@GLOBAL.gtid_binlog_state;
+--echo # Cleanup
+--eval SET @@global.max_binlog_size = $old_max_binlog_size
+DROP TABLE ti;
 
 --echo # End of the tests

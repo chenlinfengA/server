@@ -24,7 +24,6 @@
 # MDEV-21117: --tc-heuristic-recover=rollback is not replication safe
 
 
---source include/have_semisync.inc
 --source include/have_innodb.inc
 --source include/have_log_bin.inc
 --source include/have_debug.inc
@@ -85,7 +84,7 @@ SELECT @@GLOBAL.gtid_current_pos;
 # Server restart
 #
 --append_file $MYSQLTEST_VARDIR/tmp/mysqld.1.expect
-restart: --tc-heuristic-recover=BINLOG_TRUNCATE
+restart: --rpl-semi-sync-slave-enabled=1
 EOF
 --source include/wait_until_disconnected.inc
 
@@ -111,7 +110,7 @@ if(!$log_error_)
 }
 --let SEARCH_FILE=$log_error_
 --let SEARCH_RANGE=-50000
---let SEARCH_PATTERN=tc-heuristic-recover: Truncated binlog File: \.\/master\-bin\.000001 of Size:[0-9]*, to Position *
+--let SEARCH_PATTERN=truncated binlog file:.*master.*000001
 --source include/search_pattern_in_file.inc
 
 --connection server_2

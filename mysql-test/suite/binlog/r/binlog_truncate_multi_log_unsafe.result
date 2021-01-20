@@ -3,7 +3,8 @@ call mtr.add_suppression("Table '.*tm' is marked as crashed and should be repair
 call mtr.add_suppression("Got an error from unknown thread");
 call mtr.add_suppression("Checking table:   '.*tm'");
 call mtr.add_suppression("Recovering table: '.*tm'");
-call mtr.add_suppression("tc-heuristic-recover cannot trim the binary log to");
+call mtr.add_suppression("Cannot trim the binary log to");
+call mtr.add_suppression("Crash recovery failed");
 call mtr.add_suppression("Can't init tc log");
 call mtr.add_suppression("Aborting");
 call mtr.add_suppression("Found 1 prepared transactions");
@@ -12,22 +13,27 @@ call mtr.add_suppression("Checking table.*tm");
 RESET MASTER;
 CREATE TABLE ti (a INT PRIMARY KEY, b MEDIUMTEXT) ENGINE=Innodb;
 CREATE TABLE tm (f INT) ENGINE=MYISAM;
+INSERT INTO tm VALUES(1);
 connect master1,localhost,root,,;
 connect master2,localhost,root,,;
+connect master3,localhost,root,,;
 connection master1;
-SET DEBUG_SYNC= "commit_before_get_LOCK_commit_ordered SIGNAL con1_ready WAIT_FOR con1_go";
-INSERT INTO ti VALUES (2, REPEAT("x", 4100));
+SET DEBUG_SYNC= "commit_after_release_LOCK_after_binlog_sync SIGNAL master1_ready WAIT_FOR master1_go";
+INSERT INTO ti VALUES (5 - 1, REPEAT("x", 4100));
 connection master2;
-SET DEBUG_SYNC= "now WAIT_FOR con1_ready";
-INSERT INTO tm VALUES (30);
+SET DEBUG_SYNC= "commit_before_get_LOCK_commit_ordered SIGNAL master2_ready WAIT_FOR master2_go";
+INSERT INTO ti VALUES (5, REPEAT("x", 1));
+connection master3;
+SET DEBUG_SYNC= "now WAIT_FOR master2_ready";
+INSERT INTO tm VALUES (2);
 connection default;
 # Kill the server
-# BINLOG TRUNCATE recovery restart
-# ROLLLBACK heuristic recovery restart
-# NORMAL restart
+# restart as the semisync slave
+# Normal restart
 connection default;
-FOUND # /tc-heuristic-recover cannot trim the binary log/ in mysqld.1.err
-SELECT COUNT(*) = 0 as 'True' FROM ti;
+FOUND # /Cannot trim the binary log to file/ in mysqld.1.err
+# Proof that the in-doubt transaction is recovered by the 2nd normal server restart
+SELECT COUNT(*) = 5 as 'True' FROM ti;
 True
 1
 SELECT COUNT(*) <= 1 FROM tm;
@@ -35,7 +41,7 @@ COUNT(*) <= 1
 1
 SELECT @@GLOBAL.gtid_current_pos;
 @@GLOBAL.gtid_current_pos
-0-1-4
+0-1-8
 # Cleanup
 SET @@global.max_binlog_size = VALUE_AT_START;
 DROP TABLE ti, tm;

@@ -10256,6 +10256,8 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
   */
   bool truncate_validated= false;  // trued when the truncate position settled
   bool truncate_reset_done= false; // trued when the position is to reevaluate
+  /* Flags the fact of truncate position estimation on the 1st round */
+  bool truncate_set_in_1st= false;
   uint id_binlog= UINT_MAX, id_binlog_truncate= UINT_MAX;
   uint id_binlog_unsafe= UINT_MAX;
   enum_binlog_checksum_alg cs_alg; // for Stop_event with do_truncate
@@ -10340,9 +10342,6 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
         }
 #else
         {
-          if (round == 1)
-            last_gtid_valid= true;
-
           DBUG_EXECUTE_IF("binlog_truncate_partial_commit",
                           if (last_gtid_engines == 2)
                           {
@@ -10397,8 +10396,12 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
             }
             else
             {
-              /* Already set postion may change only through reset */
-              if (binlog_truncate_pos == 0)
+              /*
+                Already set postion may change only through reset unless
+                it's turn of the 1st to the 2nd round.
+              */
+              if (binlog_truncate_pos == 0 ||
+                  (truncate_set_in_1st && round == 2))
               {
                 DBUG_ASSERT(round <= 2);
                 /*
@@ -10408,9 +10411,9 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
                 */
                 DBUG_ASSERT(binlog_truncate_pos == 0 ||
                             (id_binlog > id_binlog_truncate ||
-                            (id_binlog == id_binlog_truncate &&
-                             last_gtid_pos > binlog_truncate_pos)) ||
-                            (round == 2 && truncate_validated));
+                             (id_binlog == id_binlog_truncate &&
+                              last_gtid_pos > binlog_truncate_pos)) ||
+                            (round == 2 && truncate_set_in_1st));
                 /*
                   In multi-engine case binlog_truncate_pos may be guessed
                   and reset (in other branch) multiple times until is settled.
@@ -10420,9 +10423,11 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
                 binlog_truncate_pos= last_gtid_pos;
                 strmake_buf(binlog_truncate_file_name, linfo->log_file_name);
                 id_binlog_truncate= id_binlog;
+                last_gtid_valid= false;
                 truncate_gtid= last_gtid;
                 cs_alg= fdle->checksum_alg;
                 member->in_engine_prepare= 1; // may be just estimate
+                truncate_set_in_1st= (round == 1);
               }
               else if (truncate_validated)
               {
@@ -10431,6 +10436,8 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
                   id_binlog < id_binlog_truncate ||
                   (id_binlog == id_binlog_truncate &&
                    last_gtid_pos < binlog_truncate_pos) ? 0 : 1;
+                if (member->in_engine_prepare == 0)
+                  last_gtid_valid= true;
               }
             }
           }
@@ -10438,12 +10445,13 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
         else if (do_truncate) //  "0" < last_gtid_engines
         {
           /*
-            Similar to the multi-engine partial commit branch above.
+            Similar to the multi-engine partial commit of "then" branch above.
             The 2nd condition economizes away an extra (3rd) round in
             expected cases of first xid:s in the binlog checkpoint file
             are actually of committed transactions. So fully committed
             xid sequence is passed in this branch without any action.
           */
+          last_gtid_valid= true;
           if (!truncate_validated && binlog_truncate_pos > 0)
           {
             binlog_truncate_pos= 0;
@@ -10474,8 +10482,9 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
           }
         }
         break;
+#ifdef HAVE_REPLICATION
       case GTID_LIST_EVENT:
-        if (round == 1)
+        if (round == 1 || (do_truncate && id_binlog == 0))
         {
           Gtid_list_log_event *glev= (Gtid_list_log_event *)ev;
 
@@ -10485,7 +10494,6 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
         }
         break;
 
-#ifdef HAVE_REPLICATION
       case GTID_EVENT:
         {
           Gtid_log_event *gev= (Gtid_log_event *)ev;
@@ -10496,23 +10504,29 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
           last_gtid.seq_no= gev->seq_no;
           if (round == 1)
           {
-            if ((last_gtid_standalone=
-                 ((gev->flags2 & Gtid_log_event::FL_STANDALONE) ? true : false)))
-                last_gtid_valid= true;
+            last_gtid_standalone=
+              (gev->flags2 & Gtid_log_event::FL_STANDALONE) ? true : false;
+            last_gtid_valid= true;
           }
           last_gtid_engines= gev->extra_engines + 1;
           if (do_truncate)
           {
             if (gev->flags2 & Gtid_log_event::FL_TRANSACTIONAL)
-              last_gtid_pos= prev_pos;
-            else if (binlog_unsafe_pos == 0 ||  /* the current one is greater */
-                     (id_binlog > id_binlog_unsafe ||
-                      (id_binlog == id_binlog_unsafe &&
-                       prev_pos > binlog_unsafe_pos)))
             {
-              binlog_unsafe_pos= prev_pos;
-              strmake_buf(binlog_unsafe_file_name, linfo->log_file_name);
-              id_binlog_unsafe= id_binlog;
+              last_gtid_pos= prev_pos;
+            }
+            else
+            {
+              last_gtid_valid= true;
+              if (binlog_unsafe_pos == 0 ||  /* the current one is greater */
+                  (id_binlog > id_binlog_unsafe ||
+                   (id_binlog == id_binlog_unsafe &&
+                    prev_pos > binlog_unsafe_pos)))
+              {
+                binlog_unsafe_pos= prev_pos;
+                strmake_buf(binlog_unsafe_file_name, linfo->log_file_name);
+                id_binlog_unsafe= id_binlog;
+              }
             }
           }
         }
@@ -10540,7 +10554,7 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
               (((Query_log_event *)ev)->is_commit() ||
                ((Query_log_event *)ev)->is_rollback()))))))
       {
-        DBUG_ASSERT(round == 1);
+        DBUG_ASSERT(round == 1 || do_truncate);
 
         if (rpl_global_gtid_binlog_state.update_nolock(&last_gtid, false))
           goto err2;
@@ -10601,6 +10615,8 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
         DBUG_ASSERT(do_truncate || round == 1);
         // The 3rd round is done only when the 2nd trued truncate_reset_done
         // and consequently truncate_validated.
+        // No instances of truncate_reset_done in first 2 rounds allows
+        // for existing now.
         DBUG_ASSERT(round < 3 || truncate_validated);
 
         break;
@@ -10618,6 +10634,7 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
         */
         truncate_reset_done= false;
         truncate_validated= true;
+        rpl_global_gtid_binlog_state.reset_nolock();
         id_binlog= 0;
 
         if (round > 1 &&
@@ -10635,6 +10652,7 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
       if (do_truncate)
       {
         truncate_validated= truncate_reset_done;
+        rpl_global_gtid_binlog_state.reset_nolock();
         truncate_reset_done= false;
         id_binlog= 0;
       }
