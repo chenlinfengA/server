@@ -1042,7 +1042,11 @@ static int get_options(int *argc, char ***argv)
       my_hash_insert(&ignore_table,
                      (uchar*) my_strdup("mysql.general_log", MYF(MY_WME))) ||
       my_hash_insert(&ignore_table,
-                     (uchar*) my_strdup("mysql.slow_log", MYF(MY_WME))))
+                     (uchar*) my_strdup("mysql.slow_log", MYF(MY_WME))) ||
+      my_hash_insert(&ignore_table, (uchar*) my_strdup("mysql.innodb_index_stats",
+                                                        MYF(MY_WME))) ||
+      my_hash_insert(&ignore_table, (uchar*) my_strdup("mysql.innodb_table_stats",
+                                                        MYF(MY_WME))))
     return(EX_EOM);
 
   if (my_hash_init(&ignore_data, charset_info, 16, 0, 0,
@@ -1102,11 +1106,7 @@ static int get_options(int *argc, char ***argv)
       my_hash_insert(&ignore_table,
                      (uchar*) my_strdup("mysql.index_stats", MYF(MY_WME))) ||
       my_hash_insert(&ignore_table,
-                     (uchar*) my_strdup("mysql.table_stats", MYF(MY_WME))) ||
-      my_hash_insert(&ignore_table,
-                     (uchar*) my_strdup("mysql.innodb_table_stats", MYF(MY_WME))) ||
-      my_hash_insert(&ignore_table,
-                     (uchar*) my_strdup("mysql.innodb_index_stats", MYF(MY_WME)))))
+                     (uchar*) my_strdup("mysql.table_stats", MYF(MY_WME)))))
     return(EX_EOM);
 
   if (opt_system & OPT_SYSTEM_TIMEZONES &&
